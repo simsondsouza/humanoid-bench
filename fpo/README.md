@@ -20,16 +20,6 @@ Please see the [blog](https://flowreinforce.github.io/) and [paper](todo) for mo
 
 Our initial release contains two FPO implementations. Stay tuned for more updates!
 
-### Gridworld
-
-`gridworld/` contains PyTorch code for gridworld experiments, which are based on the
-[Eric Yu's PPO implementation](https://github.com/ericyangyu/PPO-for-Beginners).
-
-### MuJoCo Playground
-
-`playground/` contains JAX code for both FPO and PPO baselines in the DeepMind Control Suite experiments, which are based on
-[MuJoCo Playground](https://github.com/google-deepmind/mujoco_playground) and [Brax](https://github.com/google/brax).
-
 ### PHC
 
 `phc/` contains PyTorch code for humanoid control experiments, which are based on the
