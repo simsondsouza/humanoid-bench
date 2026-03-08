@@ -1,4 +1,4 @@
-# python
+ # python
 .python-version
 *.egg-info
 __pycache__/
@@ -15,3 +15,43 @@ models
 outputs
 runs
 wandb
+
+# vim
+*.swp
+*.swo
+.lvimrc
+
+# jupyter
+*.ipynb_checkpoints
+
+# testing/coverage
+.coverage
+htmlcov
+.hypothesis
+
+# type checking
+.mypy_cache
+.dmypy.json
+
+# env
+.envrc
+venv
+
+# IDE
+.idea/
+
+# misc
+build
+*.pth
+*.pkl
+*.so
+
+# fpo/phc
+fpo/phc/experiments/
+fpo/phc/logs/
+fpo/phc/wandb/
+fpo/phc/smpl/
+fpo/phc/gymtorch/build/
+fpo/phc/gymtorch/dist/
+fpo/phc/.pixi/
+fpo/phc/pixi.lock
