@@ -9,7 +9,8 @@ import tqdm
 import wandb
 import gymnasium as gym
 from ml_collections import config_flags
-from flax.training import checkpoints
+# from flax.training import checkpoints
+import orbax.checkpoint as ocp
 
 import humanoid_bench
 import sac as learner
@@ -175,7 +176,9 @@ def main(_):
 
 
         if i % FLAGS.save_interval == 0 and FLAGS.save_dir is not None:
-            checkpoints.save_checkpoint(FLAGS.save_dir, agent, i)
+            # checkpoints.save_checkpoint(FLAGS.save_dir, agent, i)
+            checkpointer = ocp.PyTreeCheckpointer()
+            checkpointer.save(os.path.join(FLAGS.save_dir, f'checkpoint_{i}'), agent)
 
 if __name__ == '__main__':
     app.run(main)
