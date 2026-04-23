@@ -20,6 +20,12 @@ core_requirements = [
     "natsort==8.4.0",
 ]
 
+fpo_requirements = [
+    "jax_dataclasses>=1.6.3",
+    "tyro>=1.0.0",
+    "wandb",
+]
+
 setup(
     name="humanoid_bench",
     version="0.2",
@@ -32,4 +38,7 @@ setup(
     include_package_data=True,
     python_requires=">3.7",
     install_requires=core_requirements,
+    extras_require={
+        "fpo": fpo_requirements,
+    },
 )
