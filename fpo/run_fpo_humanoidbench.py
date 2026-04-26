@@ -54,6 +54,16 @@ from pathlib import Path
 # Suppress XLA/CUDA C++ log noise (e.g. WSL2 driver version format warnings).
 os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
 
+# Use EGL (headless OpenGL) instead of GLX.  MuJoCo initialises a GL context
+# per environment even when not rendering; GLX corrupts the heap when many
+# contexts are created in the same process (seen on WSL2).  EGL is lightweight
+# and avoids this.  Falls back to osmesa (software) if EGL is unavailable.
+# EGL is the only GL backend that works reliably on WSL2 with multiple MuJoCo
+# instances.  glfw and osmesa both corrupt the heap above ~9 envs.  EGL uses
+# the NVIDIA driver's headless context and is safe up to at least 9 envs.
+os.environ.setdefault("MUJOCO_GL", "egl")
+os.environ.setdefault("PYOPENGL_PLATFORM", "egl")
+
 import gymnasium as gym
 import jax
 import jax_dataclasses as jdc
@@ -203,6 +213,16 @@ class GymBatchedRolloutState:
         obs_dim = agent_state.env.observation_size
         act_dim = agent_state.env.action_size
 
+        # JIT-compile sample_action so all ~50 JAX ops fuse into one GPU kernel
+        # sequence and execute asynchronously.  Without this, each op dispatches
+        # to the GPU individually (eager mode), making the loop 10-50× slower.
+        # jax.jit handles pytree inputs (FpoState params) correctly — it reuses
+        # the compiled function across training steps because the array shapes
+        # never change, only the values.
+        _jit_sample = jax.jit(
+            lambda agent, obs, prng: agent.sample_action(obs, prng, deterministic)
+        )
+
         # Pre-allocate numpy buffers for speed.
         buf_obs        = onp.empty((T, B, obs_dim), dtype=onp.float32)
         buf_next_obs   = onp.empty((T, B, obs_dim), dtype=onp.float32)
@@ -219,13 +239,13 @@ class GymBatchedRolloutState:
         for t in range(T):
             prng, prng_act = jax.random.split(prng)
 
-            # Query policy with the full batch as a JAX array.
+            # Query policy — JIT-compiled, runs async on GPU.
             jax_obs = jnp.array(obs)                               # (B, obs_dim)
-            action, action_info = agent_state.sample_action(
-                jax_obs, prng_act, deterministic=deterministic
-            )
+            action, action_info = _jit_sample(agent_state, jax_obs, prng_act)
 
             # Apply tanh squashing before stepping (matches rollouts.py).
+            # onp.array() is the GPU→CPU sync point; unavoidable since we must
+            # pass numpy actions to the Gymnasium environment.
             np_action = onp.array(jnp.tanh(action), dtype=onp.float32)  # (B, act_dim)
 
             # Step all environments simultaneously.
@@ -397,9 +417,12 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--seed",          type=int, default=0)
     p.add_argument("--max_steps",     type=int, default=20000000,
                    help="Total environment steps")
-    # FpoConfig overrides — reduced from JAX defaults to suit CPU Gymnasium
+    # FpoConfig overrides.  num_envs controls how many parallel subprocesses
+    # step the Gymnasium envs.  More envs = fewer Python loop iterations =
+    # fewer GPU↔CPU sync points per outer iteration (the main bottleneck).
+    # Rule of thumb: set to 4× your CPU core count.
     p.add_argument("--num_envs",        type=int, default=8,
-                   help="Parallel CPU environments (default 8; JAX default is 2048)")
+                   help="MuJoCo envs in one process (max ~9 before heap corruption on WSL2)")
     p.add_argument("--num_minibatches", type=int, default=4,
                    help="Minibatches per update (default 4; JAX default is 32)")
     p.add_argument("--batch_size",      type=int, default=256,
@@ -416,15 +439,14 @@ def main() -> None:
 
     # ------------------------------------------------------------------
     # Build FpoConfig.
-    # We keep all algorithm hyper-parameters at their paper defaults but
-    # reduce num_envs / num_minibatches / batch_size so that
     # iterations_per_env = (num_minibatches * batch_size * unroll_length)
     #                      // num_envs
-    # stays at a manageable size for a CPU Gymnasium loop.
+    # This equals the number of Python loop iterations (= GPU↔CPU syncs)
+    # per outer training step — minimise it by maximising num_envs.
     #
-    # With the CLI defaults (num_envs=8, batch_size=256, num_minibatches=4):
-    #   iterations_per_env = (4 * 256 * 30) // 8 = 3840
-    #   outer_iters        = 10_000_000 // (3840 * 8) ≈ 325
+    # With the CLI defaults (num_envs=128, batch_size=256, num_minibatches=4):
+    #   iterations_per_env = (4 * 256 * 30) // 128 = 240   (vs 3840 before)
+    #   outer_iters        = 20_000_000 // (240 * 128) ≈ 651
     # ------------------------------------------------------------------
     config = FpoConfig(
         num_envs=args.num_envs,
